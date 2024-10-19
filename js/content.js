@@ -80,6 +80,10 @@ const util = {
     c.set(b, a.length);
     return c;
   },
+  formatFileName: (username, date, id, index) => {
+    const formattedDate = date.toISOString().slice(0, 10).replace(/-/g, '');
+    return `${username}_${formattedDate}_${id}_${String(index).padStart(2, '0')}`;
+  },
 
   downloadImage: (imageUrl, fileName) => {
     return new Promise((resolve, reject) => {
@@ -97,12 +101,12 @@ const util = {
     });
   },
 
-  downloadAllImages: async (images) => {
+  downloadAllImages: async (images, username, id) => {
     const results = [];
+    const date = new Date();
     for (const [index, img] of images.entries()) {
       const imageUrl = img.src;
-      console.log({imageUrl})
-      const fileName = `bluesky_image_${Date.now()}_${index + 1}.jpg`;
+      const fileName = util.formatFileName(username, date, id, index + 1) + '.jpg';
       try {
         const result = await util.downloadImage(imageUrl, fileName);
         results.push({ success: result.success, fileName });
@@ -113,7 +117,6 @@ const util = {
     return results;
   }
 };
-
 // Button creation
 function createConvertButton() {
   const button = document.createElement('div');
@@ -158,6 +161,10 @@ function injectConvertButton(post) {
   const video = findVideoInPost(post);
   const images = findImagesInPost(post);
 
+  const username = findNameInPost(post);
+
+  const id = findIdInPost(post);
+  
   if (!video && images.length === 0) return;
 
   const convertButtonContainer = document.createElement('div');
@@ -168,7 +175,7 @@ function injectConvertButton(post) {
   convertButton.onclick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    handleConvertAndDownload(video, images);
+    handleConvertAndDownload({video, images, username, id});
   };
 
   convertButtonContainer.appendChild(convertButton);
@@ -183,23 +190,60 @@ function findVideoInPost(post) {
 
 // Find images in a post
 function findImagesInPost(post) {
-  return Array.from(post.querySelectorAll('img[src^="https://cdn.bsky.app/img/feed_thumbnail/"]'));
+  return Array.from(post.querySelectorAll('img[src^="https://cdn.bsky.app/img/feed_thumbnail/"]'))
+    .map(img => {
+      // Replace 'feed_thumbnail' with 'feed_fullsize' for higher quality images
+      img.src = img.src.replace('feed_thumbnail', 'feed_fullsize');
+      return img;
+    });
+}
+function findNameInPost(post) {
+  const dataTestId = post.getAttribute('data-testid');
+  if (dataTestId) {
+    // Extract the username from the data-testid attribute
+    const match = dataTestId.match(/(?:feedItem-by-|postThreadItem-by-)([^.]+)/);
+    if (match) {
+      return match[1]; // This will return the username, e.g., "daniiba"
+    }
+  }
+  return "user"; // Return a default value if no username is found
 }
 
+function findIdInPost(post) {
+  // Check if we're on a post page by looking for the post ID in the current URL
+  const urlMatch = window.location.href.match(/\/post\/([^/]+)/);
+  if (urlMatch) {
+    return urlMatch[1]; // Return the post ID from the URL
+  }
+
+  // If not on a post page, look for the post ID in the links within the post
+  const links = post.querySelectorAll(`a[href*="/post/"]`);
+  console.log({links});
+  for (const link of links) {
+    const match = link.href.match(/\/post\/([^/]+)/);
+    if (match) {
+      return match[1]; // Return the post ID from the link
+    }
+  }
+
+  return null; // Return null if no post ID is found
+}
+
+
 // Handle convert and download
-async function handleConvertAndDownload(video, images) {
+async function handleConvertAndDownload({video, images, username, id}) {
   try {
-    let message = '';
+    let message = ''; 
 
     if (video) {
       util.log('Converting video');
-      const result = await handleConvertVideo(video);
+      const result = await handleConvertVideo(video, username, id);
       message += result.success ? 'Video conversion initiated. ' : `Video conversion failed: ${result.error}. `;
     }
 
     if (images.length > 0) {
       util.log(`Downloading ${images.length} images`);
-      const imageResults = await util.downloadAllImages(images);
+      const imageResults = await util.downloadAllImages(images, username, id);
       const successfulImages = imageResults.filter(r => r.success).length;
       message += `Downloaded ${successfulImages}/${images.length} images. `;
     }
@@ -210,7 +254,7 @@ async function handleConvertAndDownload(video, images) {
 }
 
 // Convert video handler
-async function handleConvertVideo(video) {
+async function handleConvertVideo(video, username, id) {
   try {
     const posterUrl = video.poster;
     util.log(`Poster URL: ${posterUrl}`);
@@ -230,7 +274,8 @@ async function handleConvertVideo(video) {
       throw new Error('No data fetched from TS segments');
     }
 
-    const fileName = `bluesky_video_${Date.now()}.ts`;
+    const date = new Date();
+    const fileName = util.formatFileName(username, date, id, 1) + '.ts';
 
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({
@@ -252,6 +297,8 @@ async function handleConvertVideo(video) {
     return { success: false, error: error.message };
   }
 }
+
+// ... existing code ...
 
 // Main injection function
 function injectConvertButtons() {
