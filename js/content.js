@@ -99,7 +99,7 @@ const util = {
     return c;
   },
   formatFileName: (username, id, index) => {
-    return `$bluesky_downloads/{username}_${id}_${String(index).padStart(2, '0')}`;
+    return `bluesky_downloads/${username}_${id}_${String(index).padStart(2, '0')}`;
   },
   formatVideoFileName: (username, id, index) => {
     return `${username}_${id}_${String(index).padStart(2, '0')}`;
