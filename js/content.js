@@ -9,7 +9,7 @@ const CONFIG = {
     feedItem: '[data-testid^="feedItem-by-"]',
     postPage: '[data-testid^="postThreadItem-by-"]'
   },
-  actionBarSelector: '.css-175oi2r[style*="flex-direction: row; justify-content: space-between;"]'
+  actionBarSelector: '.css-g5y9jx[style*="flex-direction: row; justify-content: space-between;"]'
 };
 
 // Utility functions
@@ -33,11 +33,29 @@ const util = {
     return svg;
   },
 
-  extractHlsUrl: (posterUrl) => {
+  extractHlsUrl: async (posterUrl) => {
     const match = posterUrl.match(/\/watch\/([^/]+\/[^/]+)\//);
     if (!match) return null;
     const [, videoPath] = match;
-    return `https://video.bsky.app/watch/${videoPath}/360p/video.m3u8`;
+	
+	const m3u8Response = await fetch(`https://video.bsky.app/watch/${videoPath}/playlist.m3u8`);
+	if (!m3u8Response.ok) {
+		throw new Error(`Failed to fetch playlist m3u8: ${m3u8Response.status} ${m3u8Response.statusText}`);
+	}
+	const m3u8Content = await m3u8Response.text();
+	util.log(`Playlist m3u8 content: ${m3u8Content}`);
+	
+	const m3u8Urls = m3u8Content
+	  .split('\n')
+	  .filter(line => line.includes('video.m3u8'))
+	  .map(m3u8Path => new URL(m3u8Path.trim().split("?")[0], `https://video.bsky.app/watch/${videoPath}/`).href)
+	  .sort((a, b) => a.length - b.length || a.localeCompare(b))
+	  .reverse();
+	util.log(`Found ${m3u8Urls.length} m3u8 URLs`);
+	
+	util.log(m3u8Urls);
+	
+    return m3u8Urls[0];
   },
 
   fetchTsSegments: async (hlsUrl) => {
@@ -80,9 +98,11 @@ const util = {
     c.set(b, a.length);
     return c;
   },
-  formatFileName: (username, date, id, index) => {
-    const formattedDate = date.toISOString().slice(0, 10).replace(/-/g, '');
-    return `${username}_${formattedDate}_${id}_${String(index).padStart(2, '0')}`;
+  formatFileName: (username, id, index) => {
+    return `$bluesky_downloads/{username}_${id}_${String(index).padStart(2, '0')}`;
+  },
+  formatVideoFileName: (username, id, index) => {
+    return `${username}_${id}_${String(index).padStart(2, '0')}`;
   },
 
   downloadImage: (imageUrl, fileName) => {
@@ -103,10 +123,9 @@ const util = {
 
   downloadAllImages: async (images, username, id) => {
     const results = [];
-    const date = new Date();
     for (const [index, img] of images.entries()) {
       const imageUrl = img.src;
-      const fileName = util.formatFileName(username, date, id, index + 1) + '.jpg';
+      const fileName = util.formatFileName(username, id, index + 1) + '.jpg';
       try {
         const result = await util.downloadImage(imageUrl, fileName);
         results.push({ success: result.success, fileName });
@@ -218,7 +237,7 @@ function findIdInPost(post) {
 
   // If not on a post page, look for the post ID in the links within the post
   const links = post.querySelectorAll(`a[href*="/post/"]`);
-  console.log({links});
+  //console.log({links});
   for (const link of links) {
     const match = link.href.match(/\/post\/([^/]+)/);
     if (match) {
@@ -258,7 +277,7 @@ async function handleConvertVideo(video, username, id) {
   try {
     const posterUrl = video.poster;
     util.log(`Poster URL: ${posterUrl}`);
-    const hlsUrl = util.extractHlsUrl(posterUrl);
+    const hlsUrl = await util.extractHlsUrl(posterUrl);
 
     if (!hlsUrl) {
       throw new Error('Could not construct HLS URL');
@@ -274,9 +293,8 @@ async function handleConvertVideo(video, username, id) {
       throw new Error('No data fetched from TS segments');
     }
 
-    const date = new Date();
-    const fileName = util.formatFileName(username, date, id, 1) + '.ts';
-
+    const fileName = util.formatVideoFileName(username, id, 1) + '.ts';
+	console.log(fileName);
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({
         action: "convertTsToMp4", 
